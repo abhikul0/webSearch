@@ -75,7 +75,8 @@ webSearch/
 
  ## Running the Application
  ### Start the Flask Application:
- ```bash python app.py
+ ```bash
+python app.py
  ```
  The application will be accessible at http://localhost:5000.
 
