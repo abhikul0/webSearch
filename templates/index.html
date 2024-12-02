@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>webSearch</title>
+    <link rel="icon" type="image/x-icon" href="/static/images/icons/logo.png">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="apple-touch-icon" sizes="192x192" href="/static/images/icons/logo.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="/static/images/icons/logo.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="webSearch">
+    <script type="module" src="{{ url_for('static', filename='js/service-worker.js') }}"></script>
+    <!-- Include highlight.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/python.min.js"></script>
+    <!-- Include marked for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>webSearch</h1>
+    </header>
+    <div class="container">
+        <div class="query-box">
+            <input type="text" id="query-input" class="input-field" placeholder="Enter your query">
+        </div>
+        <div class="menu-box">
+            <select id="model-select" class="input-field">
+                {% for model in models %}
+                    <option value="{{ model.name }}">{{ model.name }}</option>
+                {% endfor %}
+            </select>
+            <label class="switch">
+                <input type="checkbox" id="quickSearch">
+                <span class="slider round"></span>
+            </label>
+            <span class="switch-label">Quick Search</span>
+            <button id="search-btn" onclick="triggerSearch()" class="btn">Search</button>
+            <button id="reset-btn" onclick="resetSearch()" class="btn reset-btn">Reset</button>
+        </div>
+        <div id="results-box" class="scrollable-box">
+            <button id="copy-btn" class="copy-btn" onclick="copyMarkdown()">
+                <svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M16 6V4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2V2h2v2h2V2h2v2zm-2 10H8v-2h6v2zm0-4H8v-2h6v2zm0-4H8V6h6v2z"/>
+                </svg>
+                <svg class="tick-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="display: none;">
+                    <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/>
+                </svg>
+            </button>
+            <textarea id="hidden-textarea" style="position: absolute; top: -9999px; left: -9999px;"></textarea>
+            <div class="markdown"></div>
+            <div class="search-results"></div>
+        </div>
+    </div>
+
+    <script>
+        let isSearching = false;
+
+        function triggerSearch() {
+            if (isSearching) {
+                console.log("Already searching, returning early");
+                return; // Prevent multiple searches
+            }
+
+            const searchBtn = document.getElementById('search-btn');
+            searchBtn.textContent = 'Working...';
+            searchBtn.classList.add('processing');
+            searchBtn.disabled = true;
+
+            isSearching = true;
+
+            const model = document.getElementById('model-select').value;
+            const query = document.getElementById('query-input').value;
+            const quickSearch_enable = document.getElementById('quickSearch').checked;
+
+            console.log("Triggering search with model:", model, "and query:", query, "quickSearch enabled:", quickSearch_enable);
+
+            fetch('/search', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `query=${encodeURIComponent(query)}&model=${encodeURIComponent(model)}&quickSearch_enable=${encodeURIComponent(quickSearch_enable)}`
+            })
+            .then(response => {
+                console.log("Response received:", response);
+                if (!response.ok) {
+                    throw new Error('Network response was not ok ' + response.statusText);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log("Data received:", data);
+                const summaryHTML = marked.parse(data.summary);
+                document.querySelector('.markdown').innerHTML = summaryHTML;
+                document.querySelector('.search-results').innerHTML = `
+                    ${data.search_results.map(result => `
+                        <div class="search-result" onclick="openUrl('${result.url}')">
+                            <img src="https://www.google.com/s2/favicons?domain=${new URL(result.url).hostname}" alt="${result.title} favicon" class="favicon">
+                            <div class="result-details">
+                                <div class="result-title">${result.title}</div>
+                                <p class="result-url">${result.url}</p>
+                            </div>
+                        </div>
+                    `).join('')}
+                `;
+                // Initialize highlight.js
+                document.querySelectorAll('pre code').forEach((block) => {
+                    hljs.highlightBlock(block);
+                });
+                resetButtonState();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                resetButtonState();
+            });
+        }
+
+        function resetSearch() {
+            console.log("Resetting search");
+            document.getElementById('query-input').value = '';
+            document.querySelector('.markdown').innerHTML = '';
+            document.querySelector('.search-results').innerHTML = '';
+            document.getElementById('quickSearch').checked = false;
+            resetButtonState();
+        }
+
+        function resetButtonState() {
+            console.log("Resetting button state");
+            const searchBtn = document.getElementById('search-btn');
+            searchBtn.textContent = 'Search';
+            searchBtn.classList.remove('processing');
+            searchBtn.disabled = false;
+            isSearching = false; // Ensure isSearching is set to false
+        }
+
+        function openUrl(url) {
+            console.log("Opening URL:", url);
+            window.open(url, '_blank');
+        }
+
+        function copyMarkdown() {
+            const markdownContent = document.querySelector('.markdown').innerText;
+            const textarea = document.getElementById('hidden-textarea');
+
+            // Set the value of the textarea to the markdown content
+            textarea.value = markdownContent;
+
+            // Select the text in the textarea
+            textarea.select();
+            textarea.setSelectionRange(0, textarea.value.length); // For mobile devices
+
+            try {
+                // Copy the text to the clipboard
+                document.execCommand('copy');
+                // Change the icon to a tick mark
+                const copyBtn = document.getElementById('copy-btn');
+                copyBtn.querySelector('.copy-icon').style.display = 'none';
+                copyBtn.querySelector('.tick-icon').style.display = 'block';
+
+                // Reset the icon after a short delay
+                setTimeout(() => {
+                    copyBtn.querySelector('.copy-icon').style.display = 'block';
+                    copyBtn.querySelector('.tick-icon').style.display = 'none';
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+            }
+        }
+
+        // Add event listener for Enter key press
+        document.addEventListener('DOMContentLoaded', () => {
+            const queryInput = document.getElementById('query-input');
+            queryInput.addEventListener('keypress', function(event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault(); // Prevent form submission if in a form
+                    triggerSearch();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
